@@ -1,30 +1,79 @@
-from PyQt6.QtCore import QTimer, QSize, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QListWidget, QListWidgetItem, QSpinBox, QWidget, QSystemTrayIcon, QMenu, QToolBar, QFontComboBox
-from PyQt6.QtGui import QIcon, QAction
+from PyQt6.QtCore import QTimer, QSize, Qt, QPoint, QRect
+from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QListWidget, QListWidgetItem, QSpinBox, QWidget, QSystemTrayIcon, QMenu, QToolBar, QFontComboBox, QInputDialog
+from PyQt6.QtGui import QIcon, QAction, QCursor
+
 
 # First class defines the drag and drop functionality
 class MovableSpinBox(QSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.mouse_press_pos = None
+        self.setMouseTracking(True) # Required to detect hover without clicking
+        self.margin = 10            # How close to the edge to trigger resize
+        self.is_resizing = False
+        self.is_moving = False
+        self.drag_start_pos = None
+        self.initial_geometry = None
+
+    def _get_edge(self, pos):
+        """Returns which edge the mouse is over."""
+        w, h = self.width(), self.height()
+        x, y = pos.x(), pos.y()
+        
+        if x > w - self.margin and y > h - self.margin: return "bottom-right"
+        if x > w - self.margin: return "right"
+        if y > h - self.margin: return "bottom"
+        return None
 
     def mousePressEvent(self, event):
-        # Record the position where the mouse was clicked relative to the widget
         if event.button() == Qt.MouseButton.LeftButton:
-            self.mouse_press_pos = event.position().toPoint()
+            edge = self._get_edge(event.position().toPoint())
+            if edge:
+                self.is_resizing = True
+            else:
+                self.is_moving = True
+            
+            self.drag_start_pos = event.globalPosition().toPoint()
+            self.initial_geometry = self.geometry()
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        # Calculate how far the mouse has moved and update widget position
-        if event.buttons() == Qt.MouseButton.LeftButton and self.mouse_press_pos:
-            diff = event.position().toPoint() - self.mouse_press_pos
-            new_pos = self.pos() + diff
-            self.move(new_pos)
+        pos = event.position().toPoint()
+        edge = self._get_edge(pos)
+
+        # 1. Update Cursor Icon
+        if not self.is_resizing and not self.is_moving:
+            if edge == "bottom-right": self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            elif edge == "right": self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif edge == "bottom": self.setCursor(Qt.CursorShape.SizeVerCursor)
+            else: self.setCursor(Qt.CursorShape.ArrowCursor)
+
+        # 2. Handle Resizing
+        if self.is_resizing:
+            diff = event.globalPosition().toPoint() - self.drag_start_pos
+            new_width = max(50, self.initial_geometry.width() + diff.x())
+            new_height = max(40, self.initial_geometry.height() + diff.y())
+            self.resize(new_width, new_height)
+            self.update_font_size() # Sync font with new size
+
+        # 3. Handle Moving
+        elif self.is_moving:
+            diff = event.globalPosition().toPoint() - self.drag_start_pos
+            self.move(self.initial_geometry.topLeft() + diff)
+            
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        self.mouse_press_pos = None
+        self.is_resizing = False
+        self.is_moving = False
+        self.setCursor(Qt.CursorShape.ArrowCursor)
         super().mouseReleaseEvent(event)
+
+    def update_font_size(self):
+        """Scales the font size based on the current height of the widget."""
+        new_font = self.font()
+        # Roughly 60% of the widget height works well for digits
+        new_font.setPointSize(int(self.height() * 0.6))
+        self.setFont(new_font)
 
 
 class ActiveTimerWindow(QWidget):
@@ -89,19 +138,24 @@ class ActiveTimerWindow(QWidget):
             self.timer.stop()
             self.tray_icon.showMessage("Timer Done", "Your countdown has finished!", QSystemTrayIcon.MessageIcon.Information)
 
-class CreatorWindow(QMainWindow): # This will be the window where users can create their timers
-    def __init__(self, parent_main_window, preset_data=None):
+
+class CreatorEditWindow(QMainWindow): # This will be the window where users can create their timers
+    def __init__(self, parent_main_window, name, preset_data=None):
         super().__init__()
         self.main_window = parent_main_window
+        self.name = name
         self.setWindowTitle("CountDowner Creator")
         self.setMinimumSize(QSize(700, 600))
 
         # Create Toolbar
         toolbar = QToolBar("ToolBar")
         self.addToolBar(toolbar)
-        save_button = QAction("Save and Start Timer", self)
-        toolbar.addAction(save_button)
-        save_button.triggered.connect(self.save_and_launch)
+        savecurrent_button = QAction("Save", self)
+        toolbar.addAction(savecurrent_button)
+        run_button = QAction("Run Timer", self)
+        toolbar.addAction(run_button)
+        savecurrent_button.triggered.connect(self.savecurrent)
+        run_button.triggered.connect(self.run_timer)
 
         self.canvas = QWidget()
         self.setCentralWidget(self.canvas)
@@ -110,6 +164,12 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
         self.hour_input = MovableSpinBox(self)
         self.min_input = MovableSpinBox(self)
         self.sec_input = MovableSpinBox(self)
+
+        for widget in [self.hour_input, self.min_input, self.sec_input]:
+            widget.setMinimumSize(60, 40)
+            widget.update_font_size() # Set initial font scale
+
+
 
         # Setting Fonts
         self.hour_font = QFontComboBox(self)
@@ -141,18 +201,19 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
     
     def change_font(self):
         hour = self.hour_input.font()
-        hour.setPointSize(30)
+        hour.setPointSize(50)
         minute = self.min_input.font()
-        minute.setPointSize(30)
+        minute.setPointSize(50)
         second = self.sec_input.font()
-        second.setPointSize(30)
+        second.setPointSize(50)
 
         self.hour_input.setFont(self.hour_font.currentFont())
         self.min_input.setFont(self.minute_font.currentFont())
         self.sec_input.setFont(self.second_font.currentFont())
-        
-    def save_and_launch(self):
+    
+    def savecurrent(self):
         data = {
+            'name': self.name,
             'h': self.hour_input.value(),
             'm': self.min_input.value(),
             's': self.sec_input.value(),
@@ -161,37 +222,146 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
             'pos_s': (self.sec_input.x(), self.sec_input.y()),
             'h_font': self.hour_input.font(),
             'm_font': self.min_input.font(),
-            's_font': self.sec_input.font()
+            's_font': self.sec_input.font(),
+            'size_h': (self.hour_input.width(), self.hour_input.height()), # Save the size!
+            'size_m': (self.min_input.width(), self.min_input.height()),
+            'size_s': (self.sec_input.width(), self.sec_input.height())
         }
-        
-        # Launch the background window
-        self.active_timer = ActiveTimerWindow(data['h'], data['m'], data['s'], 
-                                             {'h': data['pos_h'], 'm': data['pos_m'], 's': data['pos_s']}, data['h_font'], data['m_font'], data['s_font'])
+
+        # Save to Main Window
+        self.main_window.save_timer(data)
+        self.close()
+
+    def run_timer(self):
+        self.active_timer = ActiveTimerWindow(self.hour_input.value(), self.min_input.value(), self.sec_input.value(), 
+                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  self.hour_input.font(), self.min_input.font(), self.sec_input.font())
         self.active_timer.show()
+
+
+
+
+class CreatorWindow(QMainWindow): # This will be the window where users can create their timers
+    def __init__(self, parent_main_window, preset_data=None):
+        super().__init__()
+        self.main_window = parent_main_window
+        self.setWindowTitle("CountDowner Creator")
+        self.setMinimumSize(QSize(700, 600))
+
+        # Create Toolbar
+        toolbar = QToolBar("ToolBar")
+        self.addToolBar(toolbar)
+        save_button = QAction("Save as New", self)
+        toolbar.addAction(save_button)
+        run_button = QAction("Run Timer", self)
+        toolbar.addAction(run_button)
+        save_button.triggered.connect(self.save_as_new)
+        run_button.triggered.connect(self.run_timer)
+
+        self.canvas = QWidget()
+        self.setCentralWidget(self.canvas)
+
+        # Inputs
+        self.hour_input = MovableSpinBox(self)
+        self.min_input = MovableSpinBox(self)
+        self.sec_input = MovableSpinBox(self)
+
+        # Setting Fonts
+        self.hour_font = QFontComboBox(self)
+        self.hour_font.move(50, 180)
+        self.minute_font = QFontComboBox(self)
+        self.minute_font.move(200, 180)
+        self.second_font = QFontComboBox(self)
+        self.second_font.move(350, 180)
+
+        self.hour_font.currentFontChanged.connect(self.change_font)
+        self.minute_font.currentFontChanged.connect(self.change_font)
+        self.second_font.currentFontChanged.connect(self.change_font)
+
+        # Set Number Size
+
+        # If we opened this from a preset, fill the values
+        if preset_data:
+            self.hour_input.setValue(preset_data['h'])
+            self.min_input.setValue(preset_data['m'])
+            self.sec_input.setValue(preset_data['s'])
+            self.hour_input.move(*preset_data['pos_h'])
+            self.min_input.move(*preset_data['pos_m'])
+            self.sec_input.move(*preset_data['pos_s'])
+            self.hour_input.setFont(preset_data['h_font'])
+            self.min_input.setFont(preset_data['m_font'])
+            self.sec_input.setFont(preset_data['s_font'])
+        else:
+            self.hour_input.move(50, 100)
+            self.min_input.move(200, 100)
+            self.sec_input.move(350, 100)
+    
+    def change_font(self):
+        hour = self.hour_input.font()
+        hour.setPointSize(50)
+        minute = self.min_input.font()
+        minute.setPointSize(50)
+        second = self.sec_input.font()
+        second.setPointSize(50)
+
+        self.hour_input.setFont(self.hour_font.currentFont())
+        self.min_input.setFont(self.minute_font.currentFont())
+        self.sec_input.setFont(self.second_font.currentFont())
+    
+    def save_as_new(self):
+        name, ok = QInputDialog.getText(self, "Save Timer", "Enter a name for your timer:")
+        
+        # If the user clicks 'Cancel', we stop the save process
+        if not ok:
+            return 
+            
+        # If they left it blank, give it a default
+        if not name.strip():
+            name = f"{self.hour_input.value()}:{self.min_input.value()}:{self.sec_input.value()}"
+
+
+        data = {
+            'name': name,
+            'h': self.hour_input.value(),
+            'm': self.min_input.value(),
+            's': self.sec_input.value(),
+            'pos_h': (self.hour_input.x(), self.hour_input.y()),
+            'pos_m': (self.min_input.x(), self.min_input.y()),
+            'pos_s': (self.sec_input.x(), self.sec_input.y()),
+            'h_font': self.hour_input.font(),
+            'm_font': self.min_input.font(),
+            's_font': self.sec_input.font(),
+            'size_h': (self.hour_input.width(), self.hour_input.height()), # Save the size!
+            'size_m': (self.min_input.width(), self.min_input.height()),
+            'size_s': (self.sec_input.width(), self.sec_input.height())
+        }
 
         # Save to Main Window
         self.main_window.add_saved_timer(data)
         self.close()
+
+    def run_timer(self):
+        self.active_timer = ActiveTimerWindow(self.hour_input.value(), self.min_input.value(), self.sec_input.value(), 
+                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  self.hour_input.font(), self.min_input.font(), self.sec_input.font())
+        self.active_timer.show()
     
 
 class MainWindow(QMainWindow):  #QMainWindow is the parent class
     def __init__(self):
-        super().__init__() #must always call this or else writing code for the main window will not work
-
-        self.w = None #Creator Window not open by default
+        super().__init__()
         self.setWindowTitle("CountDowner")
+        self.setMinimumSize(QSize(400, 500))
 
-        # Window Limits
-        self.setMinimumSize(QSize(400,300))
-        
         layout = QVBoxLayout()
         
         self.label = QLabel("MY TIMERS")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label)
 
-        # 1. The List Widget to show saved timers
+        # 1. Setup the List Widget with Context Menu Policy
         self.timer_list = QListWidget()
+        self.timer_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.timer_list.customContextMenuRequested.connect(self.show_context_menu)
+        
         self.timer_list.itemDoubleClicked.connect(self.load_timer)
         layout.addWidget(self.timer_list)
 
@@ -204,32 +374,65 @@ class MainWindow(QMainWindow):  #QMainWindow is the parent class
         self.setCentralWidget(container)
 
         self.w = None
-        # 2. Storage for the actual data
         self.saved_presets = []
 
+    def show_context_menu(self, position):
+        """Triggered when the user right-clicks the list."""
+        item = self.timer_list.itemAt(position)
+        
+        if item:
+            menu = QMenu()
+            delete_action = QAction("Delete Timer", self)
+            
+            # Using a lambda to pass the specific item to the delete function
+            delete_action.triggered.connect(lambda: self.delete_timer(item))
+            
+            menu.addAction(delete_action)
+            # Display the menu at the cursor's position
+            menu.exec(self.timer_list.mapToGlobal(position))
+
+    def delete_timer(self, item):
+        """Removes the timer from the UI and the data list."""
+        # Find which row was clicked
+        row = self.timer_list.row(item)
+        
+        # Remove from the QListWidget UI
+        self.timer_list.takeItem(row)
+        
+        # Remove from our saved_presets data list
+        if 0 <= row < len(self.saved_presets):
+            self.saved_presets.pop(row)
+            
+        print(f"Deleted timer at row {row}")
+
     def add_saved_timer(self, data):
-        """Adds a timer preset to the list and memory."""
         self.saved_presets.append(data)
-        
-        # Create a display string for the list
-        display_text = f"Timer: {data['h']:02}:{data['m']:02}:{data['s']:02}"
-        item = QListWidgetItem(display_text)
-        
-        # Store the index so we know which data to grab later
-        item.setData(Qt.ItemDataRole.UserRole, len(self.saved_presets) - 1)
-        self.timer_list.addItem(item)
+        display_text = f"Timer: {data['name']}"
+        self.timer_list.addItem(display_text)
+
+    def save_timer(self, data):
+        display_text = f"{data['name']}"
+        for i in range(self.timer_list.count()):
+            item = self.timer_list.item(i)
+            if(item.text() == display_text):
+                row = self.timer_list.row(item)
+                self.timer_list.takeItem(row)
+                if 0 <= row < len(self.saved_presets):
+                    self.saved_presets.pop(row)
+        self.saved_presets.append(data)
+        self.timer_list.addItem(display_text)
+
 
     def open_creator(self):
         self.w = CreatorWindow(self)
         self.w.show()
 
     def load_timer(self, item):
-        """Re-opens the creator with saved data when an item is double-clicked."""
-        index = item.data(Qt.ItemDataRole.UserRole)
-        preset_data = self.saved_presets[index]
-        self.w = CreatorWindow(self, preset_data)
-        self.w.show()
-
+        row = self.timer_list.row(item)
+        if 0 <= row < len(self.saved_presets):
+            preset_data = self.saved_presets[row]
+            self.w = CreatorEditWindow(self, item.text(), preset_data)
+            self.w.show()
 
         
 
