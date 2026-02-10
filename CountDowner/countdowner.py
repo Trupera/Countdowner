@@ -1,5 +1,5 @@
 from PyQt6.QtCore import QTimer, QSize, Qt
-from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QListWidget, QSpinBox, QWidget, QSystemTrayIcon, QMenu, QToolBar, QFontComboBox, QInputDialog, QFileDialog
+from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QListWidget, QSpinBox, QWidget, QSystemTrayIcon, QMenu, QToolBar, QFontComboBox, QInputDialog, QFileDialog, QColorDialog
 from PyQt6.QtGui import QAction, QPixmap, QMovie
 from playsound import playsound
 
@@ -9,11 +9,33 @@ class MovableSpinBox(QSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMouseTracking(True) # Required to detect hover without clicking
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self.open_color_menu)
         self.margin = 10            # How close to the edge to trigger resize
         self.is_resizing = False
         self.is_moving = False
         self.drag_start_pos = None
         self.initial_geometry = None
+        self.current_color = "white"
+    
+    def open_color_menu(self):
+        """Open the color picker menu for this widget"""
+        color = QColorDialog.getColor()
+
+        if color.isValid():
+            self.current_color = color.name()
+            print(color.name())
+            self.setStyleSheet(f"""
+            QSpinBox {{
+                color: {self.current_color};
+                background-color: rgba(255, 255, 255, 150); 
+                border: 1px solid #888;
+                border-radius: 5px;
+            }}
+            QSpinBox::up-button, QSpinBox::down-button {{
+                width: 0px; 
+            }}
+        """)
 
     def _get_edge(self, pos):
         """Returns which edge the mouse is over."""
@@ -36,6 +58,8 @@ class MovableSpinBox(QSpinBox):
             self.drag_start_pos = event.globalPosition().toPoint()
             self.initial_geometry = self.geometry()
         super().mousePressEvent(event)
+
+    
 
     def mouseMoveEvent(self, event):
         pos = event.position().toPoint()
@@ -79,7 +103,7 @@ class MovableSpinBox(QSpinBox):
 
 class ActiveTimerWindow(QWidget):
     """The replica window that runs in the background."""
-    def __init__(self, h, m, s, positions, h_font, m_font, s_font, alarm, bg_path):
+    def __init__(self, h, m, s, positions, h_font, m_font, s_font, h_color, m_color, s_color, alarm, bg_path):
         super().__init__()
         self.setWindowTitle("MyTimer")
         self.setMinimumSize(QSize(700, 600))
@@ -96,6 +120,11 @@ class ActiveTimerWindow(QWidget):
         self.hour_label.setFont(h_font)
         self.min_label.setFont(m_font)
         self.sec_label.setFont(s_font)
+
+        # Set Color
+        self.hour_label.setStyleSheet(f"color: {h_color};")
+        self.min_label.setStyleSheet(f"color: {m_color};")
+        self.sec_label.setStyleSheet(f"color: {s_color};")
 
         # Set Background
         self.bg_label = QLabel(self)
@@ -169,27 +198,26 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
         self.name = name
         self.alarm = None
         self.setWindowTitle("CountDowner Creator")
-        self.setMinimumSize(QSize(700, 600))
+        self.setMinimumSize(QSize(900, 800))
 
+        layout = QVBoxLayout()
 
-        # Set Background Elements
-        self.bg_label = QLabel(self)
-        self.bg_label.setGeometry(0, 0, 700, 600)
-        self.bg_label.setScaledContents(True) # Make image fill the label
-        self.bg_label.lower() # Send to back so it doesn't cover numbers
-        self.bg_path = None
+        self.label = QLabel(self)
+        layout.addWidget(self.label)
+        self.label.setText("H->M->S")
+        self.label.move(50, 50)
 
         # Create Toolbar
-        toolbar = QToolBar("ToolBar")
-        self.addToolBar(toolbar)
+        self.toolbar = self.addToolBar("Main")
         savecurrent_button = QAction("Save", self)
-        toolbar.addAction(savecurrent_button)
+        self.toolbar.addAction(savecurrent_button)
         run_button = QAction("Run Timer", self)
-        toolbar.addAction(run_button)
+        self.toolbar.addAction(run_button)
         alarm_button = QAction("Alarm Sound", self)
-        toolbar.addAction(alarm_button)
+        self.toolbar.addAction(alarm_button)
         background_button = QAction("Set Background", self)
-        toolbar.addAction(background_button)
+        self.toolbar.addAction(background_button)
+
         savecurrent_button.triggered.connect(self.savecurrent)
         run_button.triggered.connect(self.run_timer)
         alarm_button.triggered.connect(self.open_alarm_sound)
@@ -199,23 +227,32 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
         self.setCentralWidget(self.canvas)
         self.canvas.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
+        # Set Background Elements
+        self.bg_label = QLabel(self.canvas)
+        self.bg_label.setGeometry(0, 0, 700, 600)
+        self.bg_label.setScaledContents(True) # Make image fill the label
+        self.bg_label.lower() # Send to back so it doesn't cover numbers
+        self.bg_path = None
+
         # Inputs
-        self.hour_input = MovableSpinBox(self)
-        self.min_input = MovableSpinBox(self)
-        self.sec_input = MovableSpinBox(self)
+        self.hour_input = MovableSpinBox(self.canvas)
+        self.hour_input.move(50, 100)
+        self.min_input = MovableSpinBox(self.canvas)
+        self.min_input.move(200, 100)
+        self.sec_input = MovableSpinBox(self.canvas)
+        self.sec_input.move(350, 100)
 
         for widget in [self.hour_input, self.min_input, self.sec_input]:
             widget.setMinimumSize(60, 40)
             widget.update_font_size() # Set initial font scale
 
 
-
         # Setting Fonts
-        self.hour_font = QFontComboBox(self)
+        self.hour_font = QFontComboBox(self.canvas)
         self.hour_font.move(50, 180)
-        self.minute_font = QFontComboBox(self)
+        self.minute_font = QFontComboBox(self.canvas)
         self.minute_font.move(200, 180)
-        self.second_font = QFontComboBox(self)
+        self.second_font = QFontComboBox(self.canvas)
         self.second_font.move(350, 180)
 
         self.hour_font.currentFontChanged.connect(self.change_font)
@@ -233,6 +270,9 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
             self.hour_input.setFont(preset_data['h_font'])
             self.min_input.setFont(preset_data['m_font'])
             self.sec_input.setFont(preset_data['s_font'])
+            self.hour_input.current_color = preset_data['h_color']
+            self.min_input.current_color = preset_data['m_color']
+            self.sec_input.current_color = preset_data['s_color']
 
             if not preset_data['background'] == None:
                 self.bg_path = preset_data['background']
@@ -279,6 +319,7 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
     # Make sure background resizes if the window resizes
     def resizeEvent(self, event):
         self.bg_label.setGeometry(0, 0, self.width(), self.height())
+        self.bg_label.resize(self.canvas.size())
         super().resizeEvent(event)
     
     def change_font(self):
@@ -308,6 +349,9 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
             'size_h': (self.hour_input.width(), self.hour_input.height()), # Save the size!
             'size_m': (self.min_input.width(), self.min_input.height()),
             'size_s': (self.sec_input.width(), self.sec_input.height()),
+            'h_color': self.hour_input.current_color,
+            'm_color': self.min_input.current_color,
+            's_color': self.sec_input.current_color,
             'background': self.bg_path
         }
 
@@ -317,7 +361,8 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
 
     def run_timer(self):
         self.active_timer = ActiveTimerWindow(self.hour_input.value(), self.min_input.value(), self.sec_input.value(), 
-                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.alarm, self.bg_path)
+                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  
+                                            self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.hour_input.current_color, self.min_input.current_color, self.sec_input.current_color, self.alarm, self.bg_path)
         self.active_timer.show()
 
 
@@ -327,53 +372,67 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
         self.main_window = parent_main_window
         self.alarm = None
         self.setWindowTitle("CountDowner Creator")
-        self.setMinimumSize(QSize(700, 600))
+        self.setMinimumSize(QSize(900, 800))
 
-        # Set Background Elements
-        self.bg_label = QLabel(self)
-        self.bg_label.setGeometry(0, 0, 700, 600)
-        self.bg_label.setScaledContents(True) # Make image fill the label
-        self.bg_label.lower() # Send to back so it doesn't cover numbers
-        self.bg_path = None
+        layout = QVBoxLayout()
+
+        self.label = QLabel(self)
+        layout.addWidget(self.label)
+        self.label.setText("H->M->S")
+        self.label.move(50, 50)
 
         # Create Toolbar
-        toolbar = QToolBar("ToolBar")
-        self.addToolBar(toolbar)
+        self.toolbar = self.addToolBar("Main")
         save_button = QAction("Save as New", self)
-        toolbar.addAction(save_button)
+        self.toolbar.addAction(save_button)
         run_button = QAction("Run Timer", self)
-        toolbar.addAction(run_button)
+        self.toolbar.addAction(run_button)
         alarm_button = QAction("Alarm Sound", self)
-        toolbar.addAction(alarm_button)
+        self.toolbar.addAction(alarm_button)
         background_button = QAction("Set Background", self)
-        toolbar.addAction(background_button)
+        self.toolbar.addAction(background_button)
+
         save_button.triggered.connect(self.save_as_new)
         run_button.triggered.connect(self.run_timer)
         alarm_button.triggered.connect(self.open_alarm_sound)
         background_button.triggered.connect(self.change_background)
 
+        # Create Central Widget
         self.canvas = QWidget()
         self.setCentralWidget(self.canvas)
         self.canvas.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
+
+        # Set Background Elements
+        self.bg_label = QLabel(self.canvas)
+        self.bg_label.setGeometry(0, 0, 700, 600)
+        self.bg_label.setScaledContents(True) # Make image fill the label
+        self.bg_label.lower() # Send to back so it doesn't cover numbers
+        self.bg_path = None
+
         # Inputs
-        self.hour_input = MovableSpinBox(self)
-        self.min_input = MovableSpinBox(self)
-        self.sec_input = MovableSpinBox(self)
+        self.hour_input = MovableSpinBox(self.canvas)
+        self.hour_input.move(50, 100)
+        self.hour_input.setMaximum(999)
+        self.min_input = MovableSpinBox(self.canvas)
+        self.min_input.move(200, 100)
+        self.min_input.setMaximum(59)
+        self.sec_input = MovableSpinBox(self.canvas)
+        self.sec_input.move(350, 100)
+        self.sec_input.setMaximum(59)
 
         # Setting Fonts
-        self.hour_font = QFontComboBox(self)
+        self.hour_font = QFontComboBox(self.canvas)
         self.hour_font.move(50, 180)
-        self.minute_font = QFontComboBox(self)
+        self.minute_font = QFontComboBox(self.canvas)
         self.minute_font.move(200, 180)
-        self.second_font = QFontComboBox(self)
+        self.second_font = QFontComboBox(self.canvas)
         self.second_font.move(350, 180)
 
         self.hour_font.currentFontChanged.connect(self.change_font)
         self.minute_font.currentFontChanged.connect(self.change_font)
         self.second_font.currentFontChanged.connect(self.change_font)
 
-        # Set Number Size
 
     def open_alarm_sound(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -405,6 +464,7 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
     # Make sure background resizes if the window resizes
     def resizeEvent(self, event):
         self.bg_label.setGeometry(0, 0, self.width(), self.height())
+        self.bg_label.resize(self.canvas.size())
         super().resizeEvent(event)
     
     def change_font(self):
@@ -445,6 +505,9 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
             'size_h': (self.hour_input.width(), self.hour_input.height()), # Save the size!
             'size_m': (self.min_input.width(), self.min_input.height()),
             'size_s': (self.sec_input.width(), self.sec_input.height()),
+            'h_color': self.hour_input.current_color,
+            'm_color': self.min_input.current_color,
+            's_color': self.sec_input.current_color,
             'background': self.bg_path
         }
 
@@ -454,7 +517,7 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
 
     def run_timer(self):
         self.active_timer = ActiveTimerWindow(self.hour_input.value(), self.min_input.value(), self.sec_input.value(), 
-                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.alarm,  self.bg_path)
+                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.hour_input.current_color, self.min_input.current_color, self.sec_input.current_color, self.alarm,  self.bg_path)
         self.active_timer.show()
     
 
