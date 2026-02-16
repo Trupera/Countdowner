@@ -11,6 +11,7 @@ class MovableSpinBox(QSpinBox):
         self.setMouseTracking(True) # Required to detect hover without clicking
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self.open_color_menu)
+        self.lineEdit().setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.margin = 10            # How close to the edge to trigger resize
         self.is_resizing = False
         self.is_moving = False
@@ -31,6 +32,12 @@ class MovableSpinBox(QSpinBox):
                 background-color: rgba(255, 255, 255, 150); 
                 border: 1px solid #888;
                 border-radius: 5px;
+                padding: 0px;
+            }}
+            QSpinBox QLineEdit {{
+            background: transparent;
+            padding: 0px;
+            margin: 0px;
             }}
             QSpinBox::up-button, QSpinBox::down-button {{
                 width: 0px; 
@@ -75,7 +82,7 @@ class MovableSpinBox(QSpinBox):
         # 2. Handle Resizing
         if self.is_resizing:
             diff = event.globalPosition().toPoint() - self.drag_start_pos
-            new_width = max(50, self.initial_geometry.width() + diff.x())
+            new_width = max(500, self.initial_geometry.width() + diff.x())
             new_height = max(40, self.initial_geometry.height() + diff.y())
             self.resize(new_width, new_height)
             self.update_font_size() # Sync font with new size
@@ -103,10 +110,11 @@ class MovableSpinBox(QSpinBox):
 
 class ActiveTimerWindow(QWidget):
     """The replica window that runs in the background."""
-    def __init__(self, h, m, s, positions, h_font, m_font, s_font, h_color, m_color, s_color, alarm, bg_path):
+    def __init__(self, h, m, s, positions, h_font, m_font, s_font, h_color, m_color, s_color, alarm, bg_path, size, name, sizes):
         super().__init__()
-        self.setWindowTitle("MyTimer")
-        self.setMinimumSize(QSize(700, 600))
+        self.name = name
+        self.setWindowTitle(name)
+        self.setFixedSize(QSize(size.width(), size.height()))
         self.alarm = alarm
         self.bg_path = bg_path
         print(self.bg_path)
@@ -121,6 +129,11 @@ class ActiveTimerWindow(QWidget):
         self.min_label.setFont(m_font)
         self.sec_label.setFont(s_font)
 
+        # Set Sizes for Labels
+        self.hour_label.resize(sizes['size_h'][0], sizes['size_h'][1])
+        self.min_label.resize(sizes['size_m'][0], sizes['size_m'][1])
+        self.sec_label.resize(sizes['size_s'][0], sizes['size_s'][1])
+
         # Set Color
         self.hour_label.setStyleSheet(f"color: {h_color};")
         self.min_label.setStyleSheet(f"color: {m_color};")
@@ -128,7 +141,7 @@ class ActiveTimerWindow(QWidget):
 
         # Set Background
         self.bg_label = QLabel(self)
-        self.bg_label.setGeometry(0, 0, 700, 600)
+        self.bg_label.setGeometry(0, 0, size.width(), size.height())
         self.bg_label.setScaledContents(True) 
         self.bg_label.lower() 
 
@@ -197,8 +210,21 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
         self.main_window = parent_main_window
         self.name = name
         self.alarm = None
-        self.setWindowTitle("CountDowner Creator")
+        self.setWindowTitle(name)
         self.setMinimumSize(QSize(900, 800))
+
+        self.canvas = QWidget()
+        self.setCentralWidget(self.canvas)
+        self.canvas.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        # Set Background Elements
+        self.bg_label = QLabel(self.canvas)
+        self.bg_label.setGeometry(0, 0, 700, 600)
+        self.bg_label.setScaledContents(True) # Make image fill the label
+        self.bg_label.lower() # Send to back so it doesn't cover numbers
+        self.bg_path = None
+
+        self.bg_label.lower()
 
         layout = QVBoxLayout()
 
@@ -222,17 +248,6 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
         run_button.triggered.connect(self.run_timer)
         alarm_button.triggered.connect(self.open_alarm_sound)
         background_button.triggered.connect(self.change_background)
-    
-        self.canvas = QWidget()
-        self.setCentralWidget(self.canvas)
-        self.canvas.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-
-        # Set Background Elements
-        self.bg_label = QLabel(self.canvas)
-        self.bg_label.setGeometry(0, 0, 700, 600)
-        self.bg_label.setScaledContents(True) # Make image fill the label
-        self.bg_label.lower() # Send to back so it doesn't cover numbers
-        self.bg_path = None
 
         # Inputs
         self.hour_input = MovableSpinBox(self.canvas)
@@ -241,6 +256,10 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
         self.min_input.move(200, 100)
         self.sec_input = MovableSpinBox(self.canvas)
         self.sec_input.move(350, 100)
+
+        self.hour_input.raise_()
+        self.min_input.raise_()
+        self.sec_input.raise_()
 
         for widget in [self.hour_input, self.min_input, self.sec_input]:
             widget.setMinimumSize(60, 40)
@@ -273,6 +292,7 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
             self.hour_input.current_color = preset_data['h_color']
             self.min_input.current_color = preset_data['m_color']
             self.sec_input.current_color = preset_data['s_color']
+            self.bg_label.setGeometry(0, 0, preset_data['size'].width(), preset_data['size'].height())
 
             if not preset_data['background'] == None:
                 self.bg_path = preset_data['background']
@@ -311,28 +331,48 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
                 movie = QMovie(path)
                 self.bg_label.setMovie(movie)
                 movie.start()
+                self.hour_input.raise_()
+                self.min_input.raise_()
+                self.sec_input.raise_()
             else:
                 # Handle Static Image
                 pixmap = QPixmap(path)
                 self.bg_label.setPixmap(pixmap)
+                self.hour_input.raise_()
+                self.min_input.raise_()
+                self.sec_input.raise_()
 
     # Make sure background resizes if the window resizes
     def resizeEvent(self, event):
-        self.bg_label.setGeometry(0, 0, self.width(), self.height())
-        self.bg_label.resize(self.canvas.size())
+       # Use the actual size from the event
+        self.new_size = event.size()
+        
+        # Ensure the background covers the entire window area
+        self.bg_label.setGeometry(0, 0, self.new_size.width(), self.new_size.height())
+        
+        # Keep the numbers on top after the background move
+        self.hour_input.raise_()
+        self.min_input.raise_()
+        self.sec_input.raise_()
+        
         super().resizeEvent(event)
+
+        
     
     def change_font(self):
-        hour = self.hour_input.font()
-        hour.setPointSize(50)
-        minute = self.min_input.font()
-        minute.setPointSize(50)
-        second = self.sec_input.font()
-        second.setPointSize(50)
+        h_font = self.hour_font.currentFont()
+        m_font = self.minute_font.currentFont()
+        s_font = self.second_font.currentFont()
 
-        self.hour_input.setFont(self.hour_font.currentFont())
-        self.min_input.setFont(self.minute_font.currentFont())
-        self.sec_input.setFont(self.second_font.currentFont())
+        # Apply the fonts, but keep the current point size 
+        # so your resizing doesn't get reset!
+        h_font.setPointSize(self.hour_input.font().pointSize())
+        m_font.setPointSize(self.min_input.font().pointSize())
+        s_font.setPointSize(self.sec_input.font().pointSize())
+
+        self.hour_input.setFont(h_font)
+        self.min_input.setFont(m_font)
+        self.sec_input.setFont(s_font)
     
     def savecurrent(self):
         data = {
@@ -352,7 +392,8 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
             'h_color': self.hour_input.current_color,
             'm_color': self.min_input.current_color,
             's_color': self.sec_input.current_color,
-            'background': self.bg_path
+            'background': self.bg_path,
+            'size': self.new_size
         }
 
         # Save to Main Window
@@ -362,7 +403,9 @@ class CreatorEditWindow(QMainWindow): # This will be the window where users can 
     def run_timer(self):
         self.active_timer = ActiveTimerWindow(self.hour_input.value(), self.min_input.value(), self.sec_input.value(), 
                                             {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  
-                                            self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.hour_input.current_color, self.min_input.current_color, self.sec_input.current_color, self.alarm, self.bg_path)
+                                            self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.hour_input.current_color, self.min_input.current_color, self.sec_input.current_color, 
+                                            self.alarm, self.bg_path, self.new_size, self.name,
+                                            {'size_h': (self.hour_input.width(), self.hour_input.height()), 'size_m': (self.min_input.width(), self.min_input.height()), 'size_s': (self.sec_input.width(), self.sec_input.height())})
         self.active_timer.show()
 
 
@@ -373,6 +416,20 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
         self.alarm = None
         self.setWindowTitle("CountDowner Creator")
         self.setMinimumSize(QSize(900, 800))
+
+        # Create Central Widget
+        self.canvas = QWidget()
+        self.setCentralWidget(self.canvas)
+        self.canvas.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        # Set Background Elements
+        self.bg_label = QLabel(self.canvas)
+        self.bg_label.setGeometry(0, 0, 700, 600)
+        self.bg_label.setScaledContents(True) # Make image fill the label
+        self.bg_label.lower() # Send to back so it doesn't cover numbers
+        self.bg_path = None
+
+        self.bg_label.lower()
 
         layout = QVBoxLayout()
 
@@ -397,19 +454,6 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
         alarm_button.triggered.connect(self.open_alarm_sound)
         background_button.triggered.connect(self.change_background)
 
-        # Create Central Widget
-        self.canvas = QWidget()
-        self.setCentralWidget(self.canvas)
-        self.canvas.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-
-
-        # Set Background Elements
-        self.bg_label = QLabel(self.canvas)
-        self.bg_label.setGeometry(0, 0, 700, 600)
-        self.bg_label.setScaledContents(True) # Make image fill the label
-        self.bg_label.lower() # Send to back so it doesn't cover numbers
-        self.bg_path = None
-
         # Inputs
         self.hour_input = MovableSpinBox(self.canvas)
         self.hour_input.move(50, 100)
@@ -420,6 +464,10 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
         self.sec_input = MovableSpinBox(self.canvas)
         self.sec_input.move(350, 100)
         self.sec_input.setMaximum(59)
+
+        self.hour_input.raise_()
+        self.min_input.raise_()
+        self.sec_input.raise_()
 
         # Setting Fonts
         self.hour_font = QFontComboBox(self.canvas)
@@ -456,43 +504,62 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
                 movie = QMovie(path)
                 self.bg_label.setMovie(movie)
                 movie.start()
+                self.hour_input.raise_()
+                self.min_input.raise_()
+                self.sec_input.raise_()
             else:
                 # Handle Static Image
                 pixmap = QPixmap(path)
                 self.bg_label.setPixmap(pixmap)
+                self.hour_input.raise_()
+                self.min_input.raise_()
+                self.sec_input.raise_()
 
     # Make sure background resizes if the window resizes
     def resizeEvent(self, event):
-        self.bg_label.setGeometry(0, 0, self.width(), self.height())
-        self.bg_label.resize(self.canvas.size())
+        # Use the actual size from the event
+        self.new_size = event.size()
+        
+        # Ensure the background covers the entire window area
+        self.bg_label.setGeometry(0, 0, self.new_size.width(), self.new_size.height())
+        
+        # Keep the numbers on top after the background move
+        self.hour_input.raise_()
+        self.min_input.raise_()
+        self.sec_input.raise_()
+        
         super().resizeEvent(event)
+
     
     def change_font(self):
-        hour = self.hour_input.font()
-        hour.setPointSize(50)
-        minute = self.min_input.font()
-        minute.setPointSize(50)
-        second = self.sec_input.font()
-        second.setPointSize(50)
+        h_font = self.hour_font.currentFont()
+        m_font = self.minute_font.currentFont()
+        s_font = self.second_font.currentFont()
 
-        self.hour_input.setFont(self.hour_font.currentFont())
-        self.min_input.setFont(self.minute_font.currentFont())
-        self.sec_input.setFont(self.second_font.currentFont())
+        # Apply the fonts, but keep the current point size 
+         # so your resizing doesn't get reset!
+        h_font.setPointSize(self.hour_input.font().pointSize())
+        m_font.setPointSize(self.min_input.font().pointSize())
+        s_font.setPointSize(self.sec_input.font().pointSize())
+
+        self.hour_input.setFont(h_font)
+        self.min_input.setFont(m_font)
+        self.sec_input.setFont(s_font)
     
     def save_as_new(self):
-        name, ok = QInputDialog.getText(self, "Save Timer", "Enter a name for your timer:")
+        self.name, ok = QInputDialog.getText(self, "Save Timer", "Enter a name for your timer:")
         
         # If the user clicks 'Cancel', we stop the save process
         if not ok:
             return 
             
         # If they left it blank, give it a default
-        if not name.strip():
-            name = f"{self.hour_input.value()}:{self.min_input.value()}:{self.sec_input.value()}"
+        if not self.name.strip():
+            self.name = f"{self.hour_input.value()}:{self.min_input.value()}:{self.sec_input.value()}"
 
 
         data = {
-            'name': name,
+            'name': self.name,
             'h': self.hour_input.value(),
             'm': self.min_input.value(),
             's': self.sec_input.value(),
@@ -508,7 +575,8 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
             'h_color': self.hour_input.current_color,
             'm_color': self.min_input.current_color,
             's_color': self.sec_input.current_color,
-            'background': self.bg_path
+            'background': self.bg_path,
+            'size': self.new_size
         }
 
         # Save to Main Window
@@ -517,7 +585,10 @@ class CreatorWindow(QMainWindow): # This will be the window where users can crea
 
     def run_timer(self):
         self.active_timer = ActiveTimerWindow(self.hour_input.value(), self.min_input.value(), self.sec_input.value(), 
-                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.hour_input.current_color, self.min_input.current_color, self.sec_input.current_color, self.alarm,  self.bg_path)
+                                            {'h': (self.hour_input.x(), self.hour_input.y()), 'm': (self.min_input.x(), self.min_input.y()), 's': (self.sec_input.x(), self.sec_input.y())},  
+                                            self.hour_input.font(), self.min_input.font(), self.sec_input.font(), self.hour_input.current_color, self.min_input.current_color, self.sec_input.current_color, 
+                                            self.alarm, self.bg_path, self.new_size, "My Timer",
+                                            {'size_h': (self.hour_input.width(), self.hour_input.height()), 'size_m': (self.min_input.width(), self.min_input.height()), 'size_s': (self.sec_input.width(), self.sec_input.height())})
         self.active_timer.show()
     
 
@@ -583,7 +654,7 @@ class MainWindow(QMainWindow):  #QMainWindow is the parent class
 
     def add_saved_timer(self, data):
         self.saved_presets.append(data)
-        display_text = f"Timer: {data['name']}"
+        display_text = f"{data['name']}"
         self.timer_list.addItem(display_text)
 
     def save_timer(self, data):
